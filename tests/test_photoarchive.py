@@ -1,6 +1,8 @@
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 
 from photoarchive import DuplicateIndex, classify, extract_zip, move_to_archive
 
@@ -111,3 +113,29 @@ def test_exif_date_has_priority_over_filename_and_zip_date():
 
         msg = move_to_archive(item, target, idx)
         assert "2021/7/photos" in msg
+
+
+def test_main_skips_corrupted_zip_and_continues():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bad_zip = tmp / "bad.zip"
+        bad_zip.write_bytes(b"this-is-not-a-zip")
+
+        good_zip = tmp / "good.zip"
+        with ZipFile(good_zip, "w") as zf:
+            info = ZipInfo("x/IMG_20260101_000001.HEIC")
+            info.date_time = (2026, 1, 1, 12, 0, 0)
+            zf.writestr(info, b"heic-photo")
+
+        target = tmp / "target"
+        script = Path(__file__).resolve().parents[1] / "photoarchive.py"
+        result = subprocess.run(
+            [sys.executable, str(script), str(bad_zip), str(good_zip), "--target", str(target)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert "Pomijam uszkodzony ZIP" in result.stderr
+        assert (target / "2026" / "1" / "photos" / "IMG_20260101_000001.HEIC").exists()

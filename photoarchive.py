@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".gif", ".tiff", ".webp", ".bmp"}
 VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".avi", ".mkv", ".3gp", ".hevc"}
@@ -393,7 +393,11 @@ def main() -> int:
             zip_workspace = tmp_path / zip_path.stem
             zip_workspace.mkdir(parents=True, exist_ok=True)
             print(f"Przetwarzam {zip_path} ...")
-            items = extract_zip(zip_path, zip_workspace)
+            try:
+                items = extract_zip(zip_path, zip_workspace)
+            except (BadZipFile, OSError) as exc:
+                print(f"  Pomijam uszkodzony ZIP: {zip_path} ({exc})", file=sys.stderr)
+                continue
             if not items:
                 print("  Brak plików multimedialnych w archiwum ZIP")
                 continue

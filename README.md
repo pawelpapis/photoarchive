@@ -39,6 +39,7 @@ python3 photoarchive.py archiwum.zip --target /mnt/archive --dry-run
 - Pliki typu `IMG_*.JPG` bez cech metadanych zdjęcia z aparatu (EXIF) traktuje jako `downloads`, żeby memy/grafiki nie trafiały do `photos`.
 - Nie kopiuje duplikatów: porównuje rozmiar i hash SHA-256 z już istniejącymi plikami.
 - Obsługuje wiele plików ZIP w jednym uruchomieniu.
+- Uszkodzone ZIP-y są pomijane z ostrzeżeniem i nie przerywają całego procesu.
 
 ## Testy
 
