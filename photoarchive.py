@@ -127,8 +127,38 @@ def extract_zip(zip_path: Path, workspace: Path) -> List[MediaItem]:
     return extracted
 
 
+
+
+def _extract_exif_datetime(path: Path) -> Optional[datetime]:
+    ext = path.suffix.lower()
+    if ext not in {".jpg", ".jpeg", ".heic", ".heif"}:
+        return None
+    try:
+        with path.open("rb") as f:
+            data = f.read(2 * 1024 * 1024)
+    except OSError:
+        return None
+
+    text = data.decode("latin1", errors="ignore")
+    # Typowe pola EXIF/XMP: DateTimeOriginal / CreateDate w formacie YYYY:MM:DD HH:MM:SS
+    for match in re.finditer(r"(19|20)\d{2}:[01]\d:[0-3]\d [0-2]\d:[0-5]\d:[0-5]\d", text):
+        raw = match.group(0)
+        try:
+            return datetime.strptime(raw, "%Y:%m:%d %H:%M:%S")
+        except ValueError:
+            continue
+    return None
 def guess_taken_date(path: Path, fallback: Optional[datetime]) -> datetime:
-    # Typowe nazwy iPhone: IMG_20260123_123456.jpg lub YYYYMMDD
+    # 1) Najpierw próbujemy metadane obrazu (EXIF/XMP), bo są najbardziej wiarygodne.
+    exif_dt = _extract_exif_datetime(path)
+    if exif_dt:
+        return exif_dt
+
+    # 2) Potem data z wpisu ZIP (jeśli jest).
+    if fallback:
+        return fallback
+
+    # 3) Na końcu data zaszyta w nazwie pliku (np. IMG_20260123_123456.jpg).
     name = path.stem
     m = re.search(r"(20\d{2})(\d{2})(\d{2})", name)
     if m:
@@ -137,8 +167,7 @@ def guess_taken_date(path: Path, fallback: Optional[datetime]) -> datetime:
             return datetime(y, mo, d)
         except ValueError:
             pass
-    if fallback:
-        return fallback
+
     ts = path.stat().st_mtime
     return datetime.fromtimestamp(ts)
 

@@ -85,3 +85,29 @@ def test_duplicate_skip():
 
         assert msg1.startswith("OK")
         assert msg2.startswith("SKIP duplicate")
+
+
+def test_exif_date_has_priority_over_filename_and_zip_date():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        z = tmp / "dated.zip"
+
+        fake_jpg = (
+            b"Exif\x00\x00 Apple iPhone DateTimeOriginal 2021:07:15 10:11:12 "
+            b"random-bytes"
+        )
+
+        with ZipFile(z, "w") as zf:
+            info_name = "folder/IMG_20250401_120000.jpg"
+            zf.writestr(info_name, fake_jpg)
+
+        items = extract_zip(z, tmp / "work")
+        item = items[0]
+
+        target = tmp / "target"
+        target.mkdir()
+        idx = DuplicateIndex(target)
+        idx.build()
+
+        msg = move_to_archive(item, target, idx)
+        assert "2021/7/photos" in msg
