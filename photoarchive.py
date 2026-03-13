@@ -232,6 +232,42 @@ def _looks_like_phone_screen_ratio(path: Path) -> bool:
     return 1.9 <= ratio <= 2.3
 
 
+
+
+def _jpeg_contains_camera_exif(path: Path) -> bool:
+    try:
+        with path.open("rb") as f:
+            data = f.read(1024 * 1024)
+    except OSError:
+        return False
+
+    lowered = data.lower()
+    if b"exif" not in lowered:
+        return False
+
+    camera_markers = (
+        b"apple",
+        b"iphone",
+        b"datetimeoriginal",
+        b"lensmodel",
+        b"fnumber",
+        b"exposuretime",
+    )
+    return any(marker in lowered for marker in camera_markers)
+
+
+def _looks_like_camera_photo(item: MediaItem) -> bool:
+    ext = item.path.suffix.lower()
+    lower_name = item.path.name.lower()
+    iphone_prefixes = ("img_", "dsc", "pxl_", "mvimg")
+
+    if ext in {".heic", ".heif"} and lower_name.startswith(iphone_prefixes):
+        return True
+
+    if ext in {".jpg", ".jpeg"} and lower_name.startswith(iphone_prefixes):
+        return _jpeg_contains_camera_exif(item.path)
+
+    return False
 def classify(item: MediaItem) -> str:
     lower_name = item.path.name.lower()
     lower_rel = str(item.archive_rel_path).lower()
@@ -248,8 +284,7 @@ def classify(item: MediaItem) -> str:
             return "screenshots"
         if "download" in lower_rel or "pobrane" in lower_rel:
             return "downloads"
-        iphone_prefixes = ("img_", "dsc", "pxl_", "mvimg")
-        return "photos" if lower_name.startswith(iphone_prefixes) else "downloads"
+        return "photos" if _looks_like_camera_photo(item) else "downloads"
 
     return "downloads"
 

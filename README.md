@@ -34,7 +34,8 @@ python3 photoarchive.py archiwum.zip --target /mnt/archive --dry-run
 - Odczytuje wszystkie pliki multimedialne z całego ZIP (rekurencyjnie, bez wymagania konkretnej nazwy folderu).
 - Tworzy folder docelowy, jeśli nie istnieje.
 - Grupuje pliki wg roku/miesiąca i typu (`photos`, `movies`, `screenshots`, `downloads`).
-- Screenshoty wykrywa na podstawie nazwy/pliku-ścieżki oraz heurystyk iOS (np. `IMG_1234.PNG`), żeby nie mieszać ich ze zwykłymi zdjęciami.
+- Screenshoty wykrywa na podstawie nazwy/pliku-ścieżki oraz heurystyk iOS (np. `IMG_1234.PNG`).
+- Pliki typu `IMG_*.JPG` bez cech metadanych zdjęcia z aparatu (EXIF) traktuje jako `downloads`, żeby memy/grafiki nie trafiały do `photos`.
 - Nie kopiuje duplikatów: porównuje rozmiar i hash SHA-256 z już istniejącymi plikami.
 - Obsługuje wiele plików ZIP w jednym uruchomieniu.
 
