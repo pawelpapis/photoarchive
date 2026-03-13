@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import re
+import shutil
+import sys
+import tempfile
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional
+from zipfile import ZipFile
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".gif", ".tiff", ".webp", ".bmp"}
+VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".avi", ".mkv", ".3gp", ".hevc"}
+MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Porządkuje zdjęcia i filmy z archiwów iCloud ZIP do struktury: "
+            "ROK/MIESIAC/{photos,movies,screenshots,downloads}."
+        )
+    )
+    parser.add_argument("zip_files", nargs="+", type=Path, help="Pliki *.zip do przetworzenia")
+    parser.add_argument("--target", required=True, type=Path, help="Folder docelowy z archiwum")
+    parser.add_argument(
+        "--work-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Folder roboczy do rozpakowywania ZIP (np. szybki SSD). "
+            "Jeśli pominięty, używany jest systemowy katalog tymczasowy."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Pokaż co zostałoby zrobione, bez kopiowania plików",
+    )
+    return parser.parse_args()
+
+
+@dataclass
+class MediaItem:
+    path: Path
+    zip_datetime: Optional[datetime]
+
+
+class DuplicateIndex:
+    def __init__(self, root: Path):
+        self.root = root
+        self.paths_by_size: Dict[int, List[Path]] = defaultdict(list)
+        self.hash_cache: Dict[Path, str] = {}
+
+    def build(self) -> None:
+        if not self.root.exists():
+            return
+        for path in self.root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in MEDIA_EXTS:
+                continue
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            self.paths_by_size[size].append(path)
+
+    def _file_hash(self, path: Path) -> str:
+        if path in self.hash_cache:
+            return self.hash_cache[path]
+        h = hashlib.sha256()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        digest = h.hexdigest()
+        self.hash_cache[path] = digest
+        return digest
+
+    def has_duplicate(self, candidate: Path) -> bool:
+        try:
+            size = candidate.stat().st_size
+        except OSError:
+            return False
+        maybe = self.paths_by_size.get(size)
+        if not maybe:
+            return False
+        cand_hash = self._file_hash(candidate)
+        for path in maybe:
+            if self._file_hash(path) == cand_hash:
+                return True
+        return False
+
+    def add(self, path: Path) -> None:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            return
+        self.paths_by_size[size].append(path)
+
+
+def extract_zip(zip_path: Path, workspace: Path) -> List[MediaItem]:
+    extracted: List[MediaItem] = []
+    with ZipFile(zip_path) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            in_zip = Path(info.filename)
+            if in_zip.suffix.lower() not in MEDIA_EXTS:
+                continue
+            out_path = workspace / in_zip
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(info, "r") as src, out_path.open("wb") as dst:
+                shutil.copyfileobj(src, dst, length=1024 * 1024)
+            dt = None
+            try:
+                dt = datetime(*info.date_time)
+            except ValueError:
+                pass
+            extracted.append(MediaItem(path=out_path, zip_datetime=dt))
+    return extracted
+
+
+def guess_taken_date(path: Path, fallback: Optional[datetime]) -> datetime:
+    # Typowe nazwy iPhone: IMG_20260123_123456.jpg lub YYYYMMDD
+    name = path.stem
+    m = re.search(r"(20\d{2})(\d{2})(\d{2})", name)
+    if m:
+        y, mo, d = map(int, m.groups())
+        try:
+            return datetime(y, mo, d)
+        except ValueError:
+            pass
+    if fallback:
+        return fallback
+    ts = path.stat().st_mtime
+    return datetime.fromtimestamp(ts)
+
+
+def classify(path: Path) -> str:
+    lower_name = path.name.lower()
+    ext = path.suffix.lower()
+    if "screenshot" in lower_name:
+        return "screenshots"
+    if "download" in lower_name:
+        return "downloads"
+    if ext in VIDEO_EXTS:
+        return "movies"
+    if ext in IMAGE_EXTS:
+        iphone_prefixes = ("img_", "dsc", "pxl_", "mvimg")
+        return "photos" if lower_name.startswith(iphone_prefixes) else "downloads"
+    return "downloads"
+
+
+def unique_destination_path(base_dir: Path, src_name: str) -> Path:
+    candidate = base_dir / src_name
+    if not candidate.exists():
+        return candidate
+    stem = Path(src_name).stem
+    suffix = Path(src_name).suffix
+    idx = 1
+    while True:
+        candidate = base_dir / f"{stem}_{idx}{suffix}"
+        if not candidate.exists():
+            return candidate
+        idx += 1
+
+
+def move_to_archive(
+    item: MediaItem,
+    target_root: Path,
+    duplicates: DuplicateIndex,
+    dry_run: bool = False,
+) -> str:
+    date = guess_taken_date(item.path, item.zip_datetime)
+    year = str(date.year)
+    month = str(date.month)
+    category = classify(item.path)
+
+    dest_dir = target_root / year / month / category
+    if not dry_run:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+    if duplicates.has_duplicate(item.path):
+        return f"SKIP duplicate: {item.path.name}"
+
+    dest = unique_destination_path(dest_dir, item.path.name)
+    if dry_run:
+        return f"COPY {item.path} -> {dest}"
+
+    shutil.copy2(item.path, dest)
+    duplicates.add(dest)
+    return f"OK {item.path.name} -> {dest}"
+
+
+def validate_inputs(zip_files: Iterable[Path]) -> None:
+    for zip_path in zip_files:
+        if not zip_path.exists() or not zip_path.is_file():
+            raise FileNotFoundError(f"Brak pliku ZIP: {zip_path}")
+        if zip_path.suffix.lower() != ".zip":
+            raise ValueError(f"Plik nie jest ZIP: {zip_path}")
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        validate_inputs(args.zip_files)
+    except Exception as exc:
+        print(f"Błąd walidacji: {exc}", file=sys.stderr)
+        return 2
+
+    target = args.target
+    if not args.dry_run:
+        target.mkdir(parents=True, exist_ok=True)
+
+    duplicates = DuplicateIndex(target)
+    duplicates.build()
+
+    work_parent = args.work_dir
+    if work_parent is not None:
+        work_parent.mkdir(parents=True, exist_ok=True)
+
+    total = 0
+    with tempfile.TemporaryDirectory(dir=work_parent) as tmp:
+        tmp_path = Path(tmp)
+        for zip_path in args.zip_files:
+            zip_workspace = tmp_path / zip_path.stem
+            zip_workspace.mkdir(parents=True, exist_ok=True)
+            print(f"Przetwarzam {zip_path} ...")
+            items = extract_zip(zip_path, zip_workspace)
+            if not items:
+                print("  Brak plików multimedialnych w archiwum ZIP")
+                continue
+            for item in items:
+                msg = move_to_archive(item, target, duplicates, dry_run=args.dry_run)
+                print("  " + msg)
+                total += 1
+
+    print(f"Gotowe. Przetworzono elementów: {total}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
