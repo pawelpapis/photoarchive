@@ -31,7 +31,7 @@ python3 photoarchive.py archiwum.zip --target /mnt/archive --dry-run
 
 ## Zasady działania
 
-- Odczytuje pliki multimedialne z folderu `Zdjęcia w iCloud` wewnątrz ZIP.
+- Odczytuje wszystkie pliki multimedialne z całego ZIP (rekurencyjnie, bez wymagania konkretnej nazwy folderu).
 - Tworzy folder docelowy, jeśli nie istnieje.
 - Grupuje pliki wg roku/miesiąca i typu (`photos`, `movies`, `screenshots`, `downloads`).
 - Nie kopiuje duplikatów: porównuje rozmiar i hash SHA-256 z już istniejącymi plikami.

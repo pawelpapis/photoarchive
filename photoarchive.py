@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import re
 import shutil
 import sys
@@ -12,14 +11,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Optional
 from zipfile import ZipFile
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".heic", ".heif", ".png", ".gif", ".tiff", ".webp", ".bmp"}
 VIDEO_EXTS = {".mov", ".mp4", ".m4v", ".avi", ".mkv", ".3gp", ".hevc"}
 MEDIA_EXTS = IMAGE_EXTS | VIDEO_EXTS
-ICLOUD_ROOT = "Zdjęcia w iCloud"
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -114,8 +111,6 @@ def extract_zip(zip_path: Path, workspace: Path) -> List[MediaItem]:
                 continue
             in_zip = Path(info.filename)
             if in_zip.suffix.lower() not in MEDIA_EXTS:
-                continue
-            if ICLOUD_ROOT not in in_zip.parts:
                 continue
             out_path = workspace / in_zip
             out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -238,7 +233,7 @@ def main() -> int:
             print(f"Przetwarzam {zip_path} ...")
             items = extract_zip(zip_path, zip_workspace)
             if not items:
-                print(f"  Brak plików multimedialnych w {ICLOUD_ROOT}")
+                print("  Brak plików multimedialnych w archiwum ZIP")
                 continue
             for item in items:
                 msg = move_to_archive(item, target, duplicates, dry_run=args.dry_run)

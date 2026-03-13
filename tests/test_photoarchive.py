@@ -8,8 +8,8 @@ from photoarchive import DuplicateIndex, classify, extract_zip, move_to_archive
 def _make_zip(path: Path) -> None:
     with ZipFile(path, "w") as zf:
         zf.writestr("Zdjęcia w iCloud/IMG_20260101_000001.jpg", b"photo")
-        zf.writestr("Zdjęcia w iCloud/Screenshot 2026-01-02 at 10.00.00.png", b"screen")
-        zf.writestr("Zdjęcia w iCloud/VID_20260103_000001.mov", b"movie")
+        zf.writestr("inne/foldery/Screenshot 2026-01-02 at 10.00.00.png", b"screen")
+        zf.writestr("root/VID_20260103_000001.mov", b"movie")
 
 
 def test_extract_and_classify():
